@@ -3,19 +3,23 @@ import { parseStringPromise } from 'xml2js'
 
 const DEFAULT_KMZ = 'new_zealand.kmz'
 const DEFAULT_KML = 'doc.kml'
+const DEFAULT_REFERENCE = {
+  latitude: 48.13978407641908,
+  longitude: 17.104469028329717,
+}
 
-const kmzPath = process.argv[2] ?? process.env.KMZ_PATH ?? DEFAULT_KMZ
+const config = resolveConfig(process.argv.slice(2))
 
 try {
-  const kmz = new AdmZip(kmzPath)
+  const kmz = new AdmZip(config.kmzPath)
 
-  let kmlEntry = kmz.getEntry(process.env.KML_ENTRY ?? DEFAULT_KML)
+  let kmlEntry = kmz.getEntry(config.kmlEntry)
   if (!kmlEntry) {
     kmlEntry = kmz.getEntries().find((entry) => entry.entryName.toLowerCase().endsWith('.kml'))
   }
 
   if (!kmlEntry) {
-    throw new Error(`No KML document found inside ${kmzPath}`)
+    throw new Error(`No KML document found inside ${config.kmzPath}`)
   }
 
   const kmlText = kmlEntry.getData().toString('utf8')
@@ -27,18 +31,124 @@ try {
     process.exit(0)
   }
 
-  segments.forEach((segment, index) => {
-    console.log(`${index + 1}. ${segment.name} — ${segment.coordinates.length} points`)
-    segment.coordinates.forEach((coordinate) => {
+  console.log(
+    `Reference point → lat ${config.reference.latitude.toFixed(6)}, lon ${config.reference.longitude.toFixed(6)}`,
+  )
+
+  const furthest = {
+    distanceKm: Number.NEGATIVE_INFINITY,
+    coordinate: null,
+    segment: null,
+    index: -1,
+  }
+
+  segments.forEach((segment, segmentIndex) => {
+    console.log(`${segmentIndex + 1}. ${segment.name} — ${segment.coordinates.length} points`)
+    segment.coordinates.forEach((coordinate, coordinateIndex) => {
+      const distanceKm = haversineDistanceKm(config.reference, coordinate)
+      if (distanceKm > furthest.distanceKm) {
+        furthest.distanceKm = distanceKm
+        furthest.coordinate = coordinate
+        furthest.segment = segment
+        furthest.index = coordinateIndex
+      }
+
       const altitude = coordinate.altitude != null ? `, alt ${coordinate.altitude.toFixed(2)}` : ''
-      console.log(`   lat ${coordinate.latitude.toFixed(5)}, lon ${coordinate.longitude.toFixed(5)}${altitude}`)
+      console.log(
+        `   lat ${coordinate.latitude.toFixed(5)}, lon ${coordinate.longitude.toFixed(5)}${altitude}`,
+      )
     })
     console.log('')
   })
+
+  if (furthest.coordinate && furthest.segment) {
+    const coordinate = furthest.coordinate
+    console.log('Furthest coordinate from reference:')
+    console.log(` - Segment: ${furthest.segment.name} (point #${furthest.index + 1})`)
+    console.log(
+      ` - Location: lat ${coordinate.latitude.toFixed(6)}, lon ${coordinate.longitude.toFixed(6)}`,
+    )
+    if (coordinate.altitude != null) {
+      console.log(` - Altitude: ${coordinate.altitude.toFixed(2)} m`)
+    }
+    console.log(` - Distance: ${furthest.distanceKm.toFixed(2)} km`)
+  }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error)
   console.error(`Failed to read route: ${message}`)
   process.exit(1)
+}
+
+function resolveConfig(argv) {
+  const config = {
+    kmzPath: process.env.KMZ_PATH ?? DEFAULT_KMZ,
+    kmlEntry: process.env.KML_ENTRY ?? DEFAULT_KML,
+    reference:
+      parseReference(process.env.REF ?? process.env.REFERENCE ?? process.env.KMZ_REFERENCE) ??
+      DEFAULT_REFERENCE,
+  }
+
+  let expectRefValue = false
+
+  argv.forEach((arg, index) => {
+    if (expectRefValue) {
+      const reference = parseReference(arg)
+      if (!reference) {
+        throw new Error(`Invalid --ref value at argument ${index + 3}`)
+      }
+      config.reference = reference
+      expectRefValue = false
+      return
+    }
+
+    if (arg.startsWith('--ref=')) {
+      const value = arg.slice('--ref='.length)
+      const reference = parseReference(value)
+      if (!reference) throw new Error('Invalid --ref value, expected "lat,lon"')
+      config.reference = reference
+      return
+    }
+
+    if (arg === '--ref') {
+      expectRefValue = true
+      return
+    }
+
+    if (arg.startsWith('--kml=')) {
+      config.kmlEntry = arg.slice('--kml='.length)
+      return
+    }
+
+    if (arg.startsWith('--kmz=')) {
+      config.kmzPath = arg.slice('--kmz='.length)
+      return
+    }
+
+    if (!arg.startsWith('--')) {
+      if (config.kmzPath === DEFAULT_KMZ && !process.env.KMZ_PATH) {
+        config.kmzPath = arg
+        return
+      }
+
+      if (config.reference === DEFAULT_REFERENCE) {
+        const reference = parseReference(arg)
+        if (reference) {
+          config.reference = reference
+          return
+        }
+      }
+
+      throw new Error(`Unexpected argument: ${arg}`)
+    }
+
+    throw new Error(`Unknown option: ${arg}`)
+  })
+
+  if (expectRefValue) {
+    throw new Error('Missing value for --ref option')
+  }
+
+  return config
 }
 
 function collectRouteSegments(kml) {
@@ -98,6 +208,44 @@ function parseCoordinates(raw) {
       longitude,
       altitude: Number.isFinite(altitude) ? altitude : null,
     }))
+}
+
+function parseReference(value) {
+  if (!value) return null
+
+  const [latPart, lonPart] = value.split(',').map((part) => part.trim())
+  const latitude = Number.parseFloat(latPart)
+  const longitude = Number.parseFloat(lonPart)
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null
+  }
+
+  return { latitude, longitude }
+}
+
+function haversineDistanceKm(pointA, pointB) {
+  const radiusKm = 6371.0088
+
+  const lat1 = degreesToRadians(pointA.latitude)
+  const lon1 = degreesToRadians(pointA.longitude)
+  const lat2 = degreesToRadians(pointB.latitude)
+  const lon2 = degreesToRadians(pointB.longitude)
+
+  const deltaLat = lat2 - lat1
+  const deltaLon = lon2 - lon1
+
+  const sinLat = Math.sin(deltaLat / 2)
+  const sinLon = Math.sin(deltaLon / 2)
+
+  const a = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return radiusKm * c
+}
+
+function degreesToRadians(value) {
+  return (value * Math.PI) / 180
 }
 
 function appendName(parts, candidate) {
