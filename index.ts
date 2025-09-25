@@ -1,3 +1,6 @@
+import { homedir } from 'node:os'
+import { isAbsolute, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   buildApplication,
   buildCommand,
@@ -37,8 +40,8 @@ type FurthestCoordinate = {
   index: number
 }
 
-const DEFAULT_KMZ = 'new_zealand.kmz'
-const DEFAULT_KML = 'doc.xml'
+const DEFAULT_KMZ = fileURLToPath(new URL('./new_zealand.kmz', import.meta.url))
+const DEFAULT_KML = 'doc.kml'
 const DEFAULT_REFERENCE: ReferencePoint = {
   latitude: 48.13978407641908,
   longitude: 17.104469028329717,
@@ -108,7 +111,7 @@ const cliCommand = buildCommand<CliFlags, CliArguments, CommandContext>({
     },
   },
   docs: {
-    brief: 'Inspect a KMZ archive and list route coordinates.',
+    brief: 'Calculate furthest distance between KMZ route and reference point.',
   },
 })
 
@@ -127,7 +130,8 @@ async function main(): Promise<void> {
 
 async function runKmzAnalysis(config: Config): Promise<void> {
   try {
-    const kmz = new AdmZip(config.kmzPath)
+    const kmzPath = resolveKmzPath(config.kmzPath)
+    const kmz = new AdmZip(kmzPath)
 
     const kmlEntry = findKmlEntry(kmz)
     if (!kmlEntry) {
@@ -418,4 +422,20 @@ function asString(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function resolveKmzPath(pathLike: string): string {
+  if (pathLike === '~') {
+    return homedir()
+  }
+
+  if (pathLike.startsWith('~/')) {
+    return resolvePath(homedir(), pathLike.slice(2))
+  }
+
+  if (isAbsolute(pathLike)) {
+    return pathLike
+  }
+
+  return resolvePath(process.cwd(), pathLike)
 }

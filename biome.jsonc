@@ -23,7 +23,6 @@
       },
       "correctness": {
         "noUnusedImports": "error",
-        "noNodejsModules": "error",
         "noUnusedFunctionParameters": "error"
       },
       "nursery": {
