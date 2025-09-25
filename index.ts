@@ -25,6 +25,7 @@ type RouteSegment = {
 type Config = {
   kmzPath: string
   reference: ReferencePoint
+  verbose: boolean
 }
 
 type KmlNode = Record<string, unknown>
@@ -45,6 +46,7 @@ const DEFAULT_REFERENCE: ReferencePoint = {
 type CliFlags = {
   kmz?: string
   ref?: string
+  verbose?: boolean
 }
 
 type CliArguments = [string | undefined, string | undefined]
@@ -76,10 +78,16 @@ const cliCommand = buildCommand<CliFlags, CliArguments, CommandContext>({
         placeholder: 'lat,lon',
         parse: (value) => value,
       },
+      verbose: {
+        kind: 'boolean',
+        brief: 'Print per-segment and per-point details.',
+        optional: true,
+      },
     },
     aliases: {
       k: 'kmz',
       r: 'ref',
+      v: 'verbose',
     },
     positional: {
       kind: 'tuple',
@@ -135,16 +143,14 @@ async function runKmzAnalysis(config: Config): Promise<void> {
       return
     }
 
-    console.log(
-      `Reference point → lat ${config.reference.latitude.toFixed(6)}, lon ${config.reference.longitude.toFixed(6)}`,
-    )
+    let furthest: FurthestCoordinate | null = null
 
-    let furthest: FurthestCoordinate | undefined
+    for (const [segmentIndex, segment] of segments.entries()) {
+      if (config.verbose) {
+        console.log(`${segmentIndex + 1}. ${segment.name} — ${segment.coordinates.length} points`)
+      }
 
-    segments.forEach((segment, segmentIndex) => {
-      console.log(`${segmentIndex + 1}. ${segment.name} — ${segment.coordinates.length} points`)
-
-      segment.coordinates.forEach((coordinate, coordinateIndex) => {
+      for (const [coordinateIndex, coordinate] of segment.coordinates.entries()) {
         const distanceKm = haversineDistanceKm(config.reference, coordinate)
 
         if (!furthest || distanceKm > furthest.distanceKm) {
@@ -156,14 +162,21 @@ async function runKmzAnalysis(config: Config): Promise<void> {
           }
         }
 
-        const altitude = coordinate.altitude != null ? `, alt ${coordinate.altitude.toFixed(2)}` : ''
-        console.log(`   lat ${coordinate.latitude.toFixed(5)}, lon ${coordinate.longitude.toFixed(5)}${altitude}`)
-      })
+        if (config.verbose) {
+          const altitude = coordinate.altitude != null ? `, alt ${coordinate.altitude.toFixed(2)}` : ''
+          console.log(`   lat ${coordinate.latitude.toFixed(5)}, lon ${coordinate.longitude.toFixed(5)}${altitude}`)
+        }
+      }
 
-      console.log('')
-    })
+      if (config.verbose) {
+        console.log('')
+      }
+    }
 
     if (furthest) {
+      console.log(
+        `Reference point → lat ${config.reference.latitude.toFixed(6)}, lon ${config.reference.longitude.toFixed(6)}`,
+      )
       const coordinate = furthest.coordinate
       console.log('Furthest coordinate from reference:')
       console.log(` - Segment: ${furthest.segment.name} (point #${furthest.index + 1})`)
@@ -186,6 +199,7 @@ function resolveConfig(cli: CliInputs, env: NodeJS.ProcessEnv): Config {
   const config: Config = {
     kmzPath: env.KMZ_PATH ?? DEFAULT_KMZ,
     reference: envReference ?? DEFAULT_REFERENCE,
+    verbose: false,
   }
 
   let referenceProvided = envReference !== null
@@ -201,6 +215,10 @@ function resolveConfig(cli: CliInputs, env: NodeJS.ProcessEnv): Config {
     }
     config.reference = reference
     referenceProvided = true
+  }
+
+  if (cli.flags.verbose !== undefined) {
+    config.verbose = cli.flags.verbose
   }
 
   const [firstArg, secondArg] = cli.positionals
