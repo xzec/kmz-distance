@@ -85,14 +85,12 @@ const cliCommand = buildCommand<CliFlags, CliArguments, CommandContext>({
       kind: 'tuple',
       parameters: [
         {
-          kind: 'parsed',
           brief: 'KMZ archive path.',
           placeholder: 'kmz',
           optional: true,
           parse: (value) => value,
         },
         {
-          kind: 'parsed',
           brief: 'Reference point as "lat,lon".',
           placeholder: 'lat,lon',
           optional: true,
@@ -141,7 +139,7 @@ async function runKmzAnalysis(config: Config): Promise<void> {
       `Reference point → lat ${config.reference.latitude.toFixed(6)}, lon ${config.reference.longitude.toFixed(6)}`,
     )
 
-    let furthest: FurthestCoordinate | null = null
+    let furthest: FurthestCoordinate | undefined
 
     segments.forEach((segment, segmentIndex) => {
       console.log(`${segmentIndex + 1}. ${segment.name} — ${segment.coordinates.length} points`)
@@ -331,6 +329,11 @@ function parseReference(value: string | undefined | null): ReferencePoint | null
   if (!value) return null
 
   const [latPart, lonPart] = value.split(',').map((part) => part.trim())
+
+  if (latPart === undefined || lonPart === undefined) {
+    return null
+  }
+
   const latitude = Number.parseFloat(latPart)
   const longitude = Number.parseFloat(lonPart)
 
