@@ -19,6 +19,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@stricli/core": "^1.2.0",
     "adm-zip": "^0.5.16",
     "xml2js": "^0.6.2"
   }

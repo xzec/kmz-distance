@@ -1,3 +1,10 @@
+import {
+  buildApplication,
+  buildCommand,
+  type CommandContext,
+  run,
+  type StricliDynamicCommandContext,
+} from '@stricli/core'
 import AdmZip, { type IZipEntry } from 'adm-zip'
 import { parseStringPromise } from 'xml2js'
 
@@ -35,12 +42,84 @@ const DEFAULT_REFERENCE: ReferencePoint = {
   latitude: 48.13978407641908,
   longitude: 17.104469028329717,
 }
+type CliFlags = {
+  kmz?: string
+  ref?: string
+}
+
+type CliArguments = [string | undefined, string | undefined]
+
+type CliInputs = {
+  flags: CliFlags
+  positionals: CliArguments
+}
+
+const cliCommand = buildCommand<CliFlags, CliArguments, CommandContext>({
+  func: async function kmzDistanceCommand(flags, kmzArg, referenceArg) {
+    const positionals: CliArguments = [kmzArg, referenceArg]
+    const config = resolveConfig({ flags, positionals }, process.env)
+    await runKmzAnalysis(config)
+  },
+  parameters: {
+    flags: {
+      kmz: {
+        kind: 'parsed',
+        brief: 'Path to the KMZ archive to analyze.',
+        optional: true,
+        placeholder: 'path',
+        parse: (value) => value,
+      },
+      ref: {
+        kind: 'parsed',
+        brief: 'Reference point in "lat,lon" format.',
+        optional: true,
+        placeholder: 'lat,lon',
+        parse: (value) => value,
+      },
+    },
+    aliases: {
+      k: 'kmz',
+      r: 'ref',
+    },
+    positional: {
+      kind: 'tuple',
+      parameters: [
+        {
+          kind: 'parsed',
+          brief: 'KMZ archive path.',
+          placeholder: 'kmz',
+          optional: true,
+          parse: (value) => value,
+        },
+        {
+          kind: 'parsed',
+          brief: 'Reference point as "lat,lon".',
+          placeholder: 'lat,lon',
+          optional: true,
+          parse: (value) => value,
+        },
+      ],
+    },
+  },
+  docs: {
+    brief: 'Inspect a KMZ archive and list route coordinates.',
+  },
+})
+
+const application = buildApplication(cliCommand, {
+  name: 'kmz-distance',
+})
 
 void main()
 
 async function main(): Promise<void> {
-  const config = resolveConfig(process.argv.slice(2))
+  const context: StricliDynamicCommandContext<CommandContext> = {
+    process,
+  }
+  await run(application, process.argv.slice(2), context)
+}
 
+async function runKmzAnalysis(config: Config): Promise<void> {
   try {
     const kmz = new AdmZip(config.kmzPath)
 
@@ -80,9 +159,7 @@ async function main(): Promise<void> {
         }
 
         const altitude = coordinate.altitude != null ? `, alt ${coordinate.altitude.toFixed(2)}` : ''
-        console.log(
-          `   lat ${coordinate.latitude.toFixed(5)}, lon ${coordinate.longitude.toFixed(5)}${altitude}`,
-        )
+        console.log(`   lat ${coordinate.latitude.toFixed(5)}, lon ${coordinate.longitude.toFixed(5)}${altitude}`)
       })
 
       console.log('')
@@ -105,74 +182,57 @@ async function main(): Promise<void> {
   }
 }
 
-function resolveConfig(argv: string[]): Config {
-  const envReference =
-    parseReference(process.env.REF ?? process.env.REFERENCE ?? process.env.KMZ_REFERENCE) ?? null
+function resolveConfig(cli: CliInputs, env: NodeJS.ProcessEnv): Config {
+  const envReference = parseReference(env.REF ?? env.REFERENCE ?? env.KMZ_REFERENCE) ?? null
 
   const config: Config = {
-    kmzPath: process.env.KMZ_PATH ?? DEFAULT_KMZ,
+    kmzPath: env.KMZ_PATH ?? DEFAULT_KMZ,
     reference: envReference ?? DEFAULT_REFERENCE,
   }
 
   let referenceProvided = envReference !== null
-  let expectRefValue = false
 
-  argv.forEach((arg, index) => {
-    if (expectRefValue) {
-      const reference = parseReference(arg)
+  if (cli.flags.kmz) {
+    config.kmzPath = cli.flags.kmz
+  }
+
+  if (cli.flags.ref) {
+    const reference = parseReference(cli.flags.ref)
+    if (!reference) {
+      throw new Error('Invalid --ref value, expected "lat,lon"')
+    }
+    config.reference = reference
+    referenceProvided = true
+  }
+
+  const [firstArg, secondArg] = cli.positionals
+
+  if (firstArg) {
+    if (!cli.flags.kmz && !env.KMZ_PATH && config.kmzPath === DEFAULT_KMZ) {
+      config.kmzPath = firstArg
+    } else if (!referenceProvided) {
+      const reference = parseReference(firstArg)
       if (!reference) {
-        throw new Error(`Invalid --ref value at argument ${index + 3}`)
+        throw new Error(`Unexpected argument: ${firstArg}`)
       }
       config.reference = reference
       referenceProvided = true
-      expectRefValue = false
-      return
+    } else {
+      throw new Error(`Unexpected argument: ${firstArg}`)
     }
+  }
 
-    if (arg.startsWith('--ref=')) {
-      const reference = parseReference(arg.slice('--ref='.length))
+  if (secondArg) {
+    if (!referenceProvided) {
+      const reference = parseReference(secondArg)
       if (!reference) {
-        throw new Error('Invalid --ref value, expected "lat,lon"')
+        throw new Error(`Unexpected argument: ${secondArg}`)
       }
       config.reference = reference
       referenceProvided = true
-      return
+    } else {
+      throw new Error(`Unexpected argument: ${secondArg}`)
     }
-
-    if (arg === '--ref') {
-      expectRefValue = true
-      return
-    }
-
-    if (arg.startsWith('--kmz=')) {
-      config.kmzPath = arg.slice('--kmz='.length)
-      return
-    }
-
-    if (!arg.startsWith('--')) {
-      if (config.kmzPath === DEFAULT_KMZ && !process.env.KMZ_PATH) {
-        config.kmzPath = arg
-        return
-      }
-
-      if (!referenceProvided) {
-        const reference = parseReference(arg)
-        if (!reference) {
-          throw new Error(`Unexpected argument: ${arg}`)
-        }
-        config.reference = reference
-        referenceProvided = true
-        return
-      }
-
-      throw new Error(`Unexpected argument: ${arg}`)
-    }
-
-    throw new Error(`Unknown option: ${arg}`)
-  })
-
-  if (expectRefValue) {
-    throw new Error('Missing value for --ref option')
   }
 
   return config
@@ -183,14 +243,10 @@ function findKmlEntry(kmz: AdmZip): IZipEntry | null {
   if (direct) return direct
 
   const entries = kmz.getEntries()
-  const lowerCaseMatch = entries.find((entry: IZipEntry) =>
-    entry.entryName.toLowerCase().endsWith('.xml'),
-  )
+  const lowerCaseMatch = entries.find((entry: IZipEntry) => entry.entryName.toLowerCase().endsWith('.xml'))
   if (lowerCaseMatch) return lowerCaseMatch
 
-  return (
-    entries.find((entry: IZipEntry) => entry.entryName.toLowerCase().endsWith('.kml')) ?? null
-  )
+  return entries.find((entry: IZipEntry) => entry.entryName.toLowerCase().endsWith('.kml')) ?? null
 }
 
 function collectRouteSegments(kml: unknown): RouteSegment[] {
@@ -220,16 +276,16 @@ function collectRouteSegments(kml: unknown): RouteSegment[] {
         if (coordinates.length === 0) return
 
         const label =
-          lineStrings.length > 1
-            ? `${breadcrumb.join(' / ')} (segment ${lineIndex + 1})`
-            : breadcrumb.join(' / ')
+          lineStrings.length > 1 ? `${breadcrumb.join(' / ')} (segment ${lineIndex + 1})` : breadcrumb.join(' / ')
 
         segments.push({ name: label || 'Unnamed route', coordinates })
       })
     }
 
     const folders = toArray<KmlNode>(container.Folder as KmlNode | KmlNode[] | undefined)
-    folders.forEach((folder) => traverseContainer(folder, scopedAncestors))
+    folders.forEach((folder) => {
+      traverseContainer(folder, scopedAncestors)
+    })
   }
 }
 
@@ -237,8 +293,8 @@ function collectLineStrings(node: KmlNode | undefined): KmlNode[] {
   if (!node) return []
 
   const direct = toArray<KmlNode>(node.LineString as KmlNode | KmlNode[] | undefined)
-  const nested = toArray<KmlNode>(node.MultiGeometry as KmlNode | KmlNode[] | undefined).flatMap(
-    (child) => collectLineStrings(child),
+  const nested = toArray<KmlNode>(node.MultiGeometry as KmlNode | KmlNode[] | undefined).flatMap((child) =>
+    collectLineStrings(child),
   )
 
   return [...direct, ...nested]

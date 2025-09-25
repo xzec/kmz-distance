@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@stricli/core':
+        specifier: ^1.2.0
+        version: 1.2.0
       adm-zip:
         specifier: ^0.5.16
         version: 0.5.16
@@ -86,6 +89,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@stricli/core@1.2.0':
+    resolution: {integrity: sha512-5b+npntDY0TAB7wAw0daGlh3/R2sf0TDLyrB1By2jCNH+C+lmcSqMtJXOMLVtEGSkIOvqAgIWpLMSs1PXqzt3w==}
+
   '@types/adm-zip@0.5.7':
     resolution: {integrity: sha512-DNEs/QvmyRLurdQPChqq0Md4zGvPwHerAJYWk9l2jCbD1VPpnzRJorOdiq4zsw09NFbYnhfsoEhWtxIzXpn2yw==}
 
@@ -154,6 +160,8 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.2.4':
     optional: true
+
+  '@stricli/core@1.2.0': {}
 
   '@types/adm-zip@0.5.7':
     dependencies:
