@@ -127,7 +127,6 @@ export function resolveConfig(cli: CliInputs, env: NodeJS.ProcessEnv): Config {
         throw new Error(`Unexpected argument: ${secondArg}`)
       }
       config.reference = reference
-      referenceProvided = true
     } else {
       throw new Error(`Unexpected argument: ${secondArg}`)
     }
