@@ -17,7 +17,6 @@ type RouteSegment = {
 
 type Config = {
   kmzPath: string
-  kmlEntry: string
   reference: ReferencePoint
 }
 
@@ -31,7 +30,7 @@ type FurthestCoordinate = {
 }
 
 const DEFAULT_KMZ = 'new_zealand.kmz'
-const DEFAULT_KML = 'doc.kml'
+const DEFAULT_KML = 'doc.xml'
 const DEFAULT_REFERENCE: ReferencePoint = {
   latitude: 48.13978407641908,
   longitude: 17.104469028329717,
@@ -45,7 +44,7 @@ async function main(): Promise<void> {
   try {
     const kmz = new AdmZip(config.kmzPath)
 
-    const kmlEntry = findKmlEntry(kmz, config.kmlEntry)
+    const kmlEntry = findKmlEntry(kmz)
     if (!kmlEntry) {
       throw new Error(`No KML document found inside ${config.kmzPath}`)
     }
@@ -112,7 +111,6 @@ function resolveConfig(argv: string[]): Config {
 
   const config: Config = {
     kmzPath: process.env.KMZ_PATH ?? DEFAULT_KMZ,
-    kmlEntry: process.env.KML_ENTRY ?? DEFAULT_KML,
     reference: envReference ?? DEFAULT_REFERENCE,
   }
 
@@ -151,11 +149,6 @@ function resolveConfig(argv: string[]): Config {
       return
     }
 
-    if (arg.startsWith('--kml=')) {
-      config.kmlEntry = arg.slice('--kml='.length)
-      return
-    }
-
     if (!arg.startsWith('--')) {
       if (config.kmzPath === DEFAULT_KMZ && !process.env.KMZ_PATH) {
         config.kmzPath = arg
@@ -185,14 +178,18 @@ function resolveConfig(argv: string[]): Config {
   return config
 }
 
-function findKmlEntry(kmz: AdmZip, preferredEntryName: string): IZipEntry | null {
-  const direct = kmz.getEntry(preferredEntryName)
+function findKmlEntry(kmz: AdmZip): IZipEntry | null {
+  const direct = kmz.getEntry(DEFAULT_KML)
   if (direct) return direct
 
+  const entries = kmz.getEntries()
+  const lowerCaseMatch = entries.find((entry: IZipEntry) =>
+    entry.entryName.toLowerCase().endsWith('.xml'),
+  )
+  if (lowerCaseMatch) return lowerCaseMatch
+
   return (
-    kmz
-      .getEntries()
-      .find((entry: IZipEntry) => entry.entryName.toLowerCase().endsWith('.kml')) ?? null
+    entries.find((entry: IZipEntry) => entry.entryName.toLowerCase().endsWith('.kml')) ?? null
   )
 }
 
