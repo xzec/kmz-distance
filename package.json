@@ -2,12 +2,12 @@
   "name": "kmz-distance",
   "version": "1.0.0",
   "description": "",
-  "main": "index.ts",
+  "main": "src/index.ts",
   "bin": {
     "kmz-distance": "./bin/cli.js"
   },
   "scripts": {
-    "start": "node --experimental-strip-types index.ts"
+    "start": "node --experimental-strip-types src/index.ts"
   },
   "keywords": [],
   "author": "xzec",
